@@ -15,10 +15,26 @@ const LEVELS=[
 {id:9,name:"Star Kingdom",skill:"Mixed to 29",type:"mixed",max:29,time:7,unlock:1550},
 {id:10,name:"Math Mastery",skill:"Mixed Challenge",type:"mixed",max:29,time:6,unlock:2000}
 ];
+const MINUTE_LEVELS = Array.from({ length: 22 }, (_, i) => {
+  const number = Math.floor(i / 2);
+  const type = i % 2 === 0 ? "add" : "sub";
+
+  return {
+    id: i + 1,
+    number,
+    type,
+    name: type === "add" ? `Addition +${number}` : `Subtraction −${number}`
+  };
+});
 const AVATARS=["🦄","🐱","🐶","🐰","🦊","🐼","🐨","🐸"];
 const initial={coins:10,stars:0,streak:0,bestStreak:0,correct:0,attempts:0,totalTime:0,hints:0,
 facts:{},levelStars:{},avatar:"🦄",name:"Math Explorer",sound:true,lastUnlocked:1,
-badges:[],sessions:[],strategyStats:{make10:0,nearDoubles:0,factFamily:0}};
+  badges: [],
+  sessions: [],
+  strategyStats: { make10: 0, nearDoubles: 0, factFamily: 0 },
+  minuteMath: {},
+  minuteUnlocked: 1
+};
 const load=()=>{try{return{...initial,...JSON.parse(localStorage.getItem("mathQuestV41")||"{}")}}catch{return initial}};
 const factKey=(a,op,b)=>`${a}${op}${b}`;
 
@@ -28,7 +44,16 @@ function App(){
  [started,setStarted]=useState(0),[left,setLeft]=useState(0),[hint,setHint]=useState(null),
  [qnum,setQnum]=useState(1),[round,setRound]=useState([]),[sessionStart,setSessionStart]=useState(0),
  [notice,setNotice]=useState(null),[strategy,setStrategy]=useState(null);
-
+  const [minuteLevel, setMinuteLevel] = useState(1);
+  const [minuteQuestion, setMinuteQuestion] = useState(null);
+  const [minuteInput, setMinuteInput] = useState("");
+  const [minuteNumber, setMinuteNumber] = useState(1);
+  const [minuteCorrect, setMinuteCorrect] = useState(0);
+  const [minuteWrong, setMinuteWrong] = useState(0);
+  const [minuteLeft, setMinuteLeft] = useState(60);
+  const [minuteRunning, setMinuteRunning] = useState(false);
+  const [minuteResults, setMinuteResults] = useState([]);
+ 
  const level=useMemo(()=>LEVELS.find(x=>x.id===lid),[lid]);
  useEffect(()=>localStorage.setItem("mathQuestV41",JSON.stringify(p)),[p]);
 
@@ -181,6 +206,9 @@ function App(){
       sessions: gp?.sessions ?? [],
       strategyStats: gp?.strategy_stats ?? {},
 
+      minuteMath: gp?.minute_math ?? {},
+      minuteUnlocked: gp?.minute_unlocked ?? 1,
+
       lastUnlocked: gp?.last_unlocked ?? 1,
 
       avatar: profile.avatar,
@@ -217,7 +245,45 @@ function App(){
    },100);
    return()=>clearInterval(t)
  },[screen,q,feedback,level.time,started]);
+  function makeMinuteQuestion(levelId) {
+    const l = MINUTE_LEVELS.find(x => x.id === levelId);
+    if (!l) return null;
 
+    const n = l.number;
+
+    if (l.type === "add") {
+      // Practice the target fact in both orders:
+      // 7 + 3 and 3 + 7.
+      const other = Math.floor(Math.random() * 11);
+
+      if (Math.random() < 0.5) {
+        return {
+          a: other,
+          b: n,
+          op: "+",
+          answer: other + n
+        };
+      }
+
+      return {
+        a: n,
+        b: other,
+        op: "+",
+        answer: n + other
+      };
+    }
+
+    // Subtraction practice:
+    // for −3: 3−3, 4−3, 5−3 ... 13−3.
+    const answer = Math.floor(Math.random() * 11);
+
+    return {
+      a: answer + n,
+      b: n,
+      op: "−",
+      answer
+    };
+  }
  function makeQ(l=level){
    let pool=[];
    for(let a=0;a<=l.max;a++)for(let b=0;b<=l.max;b++){
@@ -245,6 +311,139 @@ function App(){
      g.gain.value=.035;o.start();o.stop(ctx.currentTime+(kind==="reward"?.25:.1));
    }catch{}
  }
+  function startMinuteMath(id) {
+    setMinuteLevel(id);
+    setMinuteNumber(1);
+    setMinuteCorrect(0);
+    setMinuteWrong(0);
+    setMinuteLeft(60);
+    setMinuteInput("");
+    setMinuteResults([]);
+    setMinuteQuestion(makeMinuteQuestion(id));
+    setMinuteRunning(true);
+    setScreen("minuteGame");
+  }
+
+  function answerMinuteMath() {
+    if (!minuteRunning || !minuteQuestion || minuteInput === "") return;
+
+    const value = Number(minuteInput);
+    const correct = value === minuteQuestion.answer;
+
+    if (correct) {
+      setMinuteCorrect(x => x + 1);
+      beep("good");
+    } else {
+      setMinuteWrong(x => x + 1);
+      beep("bad");
+    }
+
+    setMinuteResults(results => [
+      ...results,
+      {
+        q: `${minuteQuestion.a} ${minuteQuestion.op} ${minuteQuestion.b}`,
+        answer: minuteQuestion.answer,
+        given: value,
+        correct
+      }
+    ]);
+
+    if (minuteNumber >= 25) {
+      finishMinuteMath(correct);
+      return;
+    }
+
+    setMinuteNumber(x => x + 1);
+    setMinuteInput("");
+    setMinuteQuestion(makeMinuteQuestion(minuteLevel));
+  }
+
+  function finishMinuteMath(lastCorrect = null) {
+    setMinuteRunning(false);
+
+    const finalCorrect =
+      minuteCorrect + (lastCorrect === true ? 1 : 0);
+
+    const finalWrong =
+      minuteWrong + (lastCorrect === false ? 1 : 0);
+
+    const stars =
+      finalCorrect >= 25 ? 3 :
+        finalCorrect >= 20 ? 2 :
+          finalCorrect >= 15 ? 1 : 0;
+
+    setMinuteCorrect(finalCorrect);
+    setMinuteWrong(finalWrong);
+
+    setP(old => {
+      const previous =
+        old.minuteMath?.[minuteLevel] || {
+          best: 0,
+          stars: 0,
+          attempts: 0
+        };
+
+      const newBest = Math.max(
+        previous.best || 0,
+        finalCorrect
+      );
+
+      const newStars = Math.max(
+        previous.stars || 0,
+        stars
+      );
+
+      // 20/25 or better unlocks the next level.
+      const newUnlocked =
+        finalCorrect >= 20
+          ? Math.min(
+            22,
+            Math.max(
+              old.minuteUnlocked || 1,
+              minuteLevel + 1
+            )
+          )
+          : old.minuteUnlocked || 1;
+
+      return {
+        ...old,
+
+        minuteUnlocked: newUnlocked,
+
+        minuteMath: {
+          ...(old.minuteMath || {}),
+
+          [minuteLevel]: {
+            best: newBest,
+            stars: newStars,
+            attempts: (previous.attempts || 0) + 1,
+            lastScore: finalCorrect,
+            lastPlayed: Date.now()
+          }
+        }
+      };
+    });
+
+    beep("reward");
+    setScreen("minuteFinish");
+  }
+  useEffect(() => {
+    if (screen !== "minuteGame" || !minuteRunning) return;
+
+    const timer = setInterval(() => {
+      setMinuteLeft(old => {
+        if (old <= 1) {
+          clearInterval(timer);
+          finishMinuteMath();
+          return 0;
+        }
+
+        return old - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [screen, minuteRunning]);
  function start(id){
    setLid(id);setQnum(1);setRound([]);setSessionStart(Date.now());setScreen("game");setHint(null);setStrategy(null);
    setTimeout(()=>newQuestion(id),0)
@@ -396,7 +595,17 @@ function App(){
 
  if(screen==="home")return <><Header p={p}/><main className="home">
   <section className="hero card"><button className="avatarBtn" onClick={()=>setScreen("avatar")}>{p.avatar}</button><div><h1>Hi, {p.name}! 🌈</h1><p>Ready for today's math adventure?</p></div><div className="stats"><span>🪙 {p.coins}</span><span>⭐ {p.stars}</span><span>🔥 {p.bestStreak}</span></div></section>
-  
+   <section className="card" style={{ marginBottom: "24px" }}>
+     <h2>⏱️ Minute Math</h2>
+
+     <p>
+       How many of 25 questions can you solve in one minute?
+     </p>
+
+     <button onClick={() => setScreen("minuteLevels")}>
+       ⏱️ Play Minute Math
+     </button>
+   </section>
   <h2>🗺️ Choose an adventure</h2><div className="levels">{LEVELS.map(l=>{const open=unlocked(l.id);return <button disabled={!open} className={`level card ${open?"":"locked"}`} onClick={()=>start(l.id)} key={l.id}><div className="levelIcon">{open?["🌱","🐰","🌈","🌲","💎","🏰","☁️","🌙","⭐","👑"][l.id-1]:"🔒"}</div><div><strong>Level {l.id}: {l.name}</strong><small>{l.skill}</small></div>{!open&&<em>{l.unlock} 🪙</em>}</button>})}</div>
    <div className="actions"><button onClick={() => setScreen("dashboard")}>👩‍👧 Parent Dashboard</button><button onClick={() => setScreen("avatar")}>🧸 My Character</button><button className="secondary" onClick={() => setP(x => ({ ...x, sound: !x.sound }))}>{p.sound ? "🔊 Sound On" : "🔇 Sound Off"}</button><button
      className="secondary"
@@ -426,6 +635,243 @@ function App(){
     if (error) {
       console.error("Avatar save error:", error);
     }
+  }
+  if (screen === "minuteLevels") {
+    return <>
+      <Header p={p} title="⏱️ Minute Math" />
+
+      <main className="home">
+        <section className="hero card">
+          <div>
+            <h1>⏱️ Minute Math</h1>
+            <p>25 questions · 1 minute</p>
+          </div>
+        </section>
+
+        <div className="levels">
+          {MINUTE_LEVELS.map(l => {
+            const open = l.id <= (p.minuteUnlocked || 1);
+            const record = p.minuteMath?.[l.id];
+            const best = record?.best || 0;
+            const stars = record?.stars || 0;
+
+            return (
+              <button
+                className={`level card ${open ? "" : "locked"}`}
+                key={l.id}
+                disabled={!open}
+                onClick={() => startMinuteMath(l.id)}
+              >
+                <div className="levelIcon">
+                  {open
+                    ? (l.type === "add" ? "➕" : "➖")
+                    : "🔒"}
+                </div>
+
+                <div>
+                  <strong>
+                    Level {l.id}: {l.name}
+                  </strong>
+
+                  <small>
+                    {best > 0
+                      ? `Best: ${best}/25 ${"⭐".repeat(stars)}`
+                      : open
+                        ? "Ready to practice!"
+                        : "Score 20/25 to unlock"}
+                  </small>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        <button
+          className="secondary"
+          onClick={() => setScreen("home")}
+        >
+          ← Back
+        </button>
+      </main>
+    </>;
+  }
+  if (screen === "minuteGame" && minuteQuestion) {
+    const l = MINUTE_LEVELS.find(x => x.id === minuteLevel);
+
+    return <>
+      <Header
+        p={p}
+        title={`⏱️ ${l.name}`}
+      />
+
+      <main className="game">
+
+        <div className="gameTop">
+          <button
+            className="homeBtn"
+            onClick={() => {
+              setMinuteRunning(false);
+              setScreen("minuteLevels");
+            }}
+          >
+            ← Quit
+          </button>
+
+          <span>
+            Question {minuteNumber} / 25
+          </span>
+
+          <span>
+            ⏱️ {minuteLeft}s
+          </span>
+        </div>
+
+        <div className="dots">
+          {Array.from({ length: 25 }, (_, i) => (
+            <i
+              className={
+                i < minuteNumber - 1
+                  ? "done"
+                  : i === minuteNumber - 1
+                    ? "current"
+                    : ""
+              }
+              key={i}
+            />
+          ))}
+        </div>
+
+        <section className="question card">
+
+          <div className="equation">
+            {minuteQuestion.a}
+            {" "}
+            <span>{minuteQuestion.op}</span>
+            {" "}
+            {minuteQuestion.b}
+            {" "}
+            <span>=</span>
+            {" "}
+            <strong>?</strong>
+          </div>
+
+          <div className="answerDisplay">
+            {minuteInput || "?"}
+          </div>
+
+          <div className="keypad">
+
+            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 0].map(n => (
+              <button
+                key={n}
+                onClick={() =>
+                  setMinuteInput(s =>
+                    s.length < 2 ? s + n : s
+                  )
+                }
+              >
+                {n}
+              </button>
+            ))}
+
+            <button
+              onClick={() =>
+                setMinuteInput(s => s.slice(0, -1))
+              }
+            >
+              ⌫
+            </button>
+
+            <button
+              className="go"
+              onClick={answerMinuteMath}
+            >
+              ✓
+            </button>
+
+          </div>
+
+        </section>
+      </main>
+    </>;
+  }
+  if (screen === "minuteFinish") {
+    const record = p.minuteMath?.[minuteLevel];
+
+    const best = Math.max(
+      record?.best || 0,
+      minuteCorrect
+    );
+
+    const stars =
+      minuteCorrect >= 25 ? 3 :
+        minuteCorrect >= 20 ? 2 :
+          minuteCorrect >= 15 ? 1 : 0;
+
+    return (
+      <div className="finish">
+        <div className="reward card">
+
+          <div className="celebrate">
+            ⏱️ ⭐ ⏱️
+          </div>
+
+          <h1>Minute Math Complete!</h1>
+
+          <p>Great practice, {p.name}!</p>
+
+          <div className="score">
+            <b>{minuteCorrect}/25</b>
+            <span>correct answers</span>
+          </div>
+
+          <h2>
+            {"⭐".repeat(stars)}
+            {stars === 0 && "Keep practicing!"}
+          </h2>
+
+          <p>
+            🏆 Personal best: <b>{best}/25</b>
+          </p>
+
+          {minuteWrong > 0 && (
+            <p>
+              Practice opportunities: {minuteWrong}
+            </p>
+          )}
+
+          <button
+            onClick={() => startMinuteMath(minuteLevel)}
+          >
+            🔄 Try Again
+          </button>
+
+          {minuteLevel < 22 &&
+            minuteCorrect >= 20 && (
+            <button
+              onClick={() => startMinuteMath(minuteLevel + 1)}
+            >
+              ➡️ Next Level
+            </button>
+          )}
+
+          <button
+            className="secondary"
+            onClick={() => setScreen("minuteLevels")}
+          >
+            📚 Choose Level
+          </button>
+
+          <button
+            className="secondary"
+            onClick={() => setScreen("home")}
+          >
+            🏠 Main Menu
+          </button>
+
+        </div>
+      </div>
+    );
   }
  if(screen==="avatar")return <><Header p={p}/><main className="settings card"><h1>🧸 My Character</h1><div className="bigAvatar">{p.avatar}</div><input value={p.name} onChange={e=>setP({...p,name:e.target.value.slice(0,18)})}/><div className="avatarGrid">{AVATARS.map(a=><button className={a===p.avatar?"selected":""} onClick={()=>setP({...p,avatar:a})} key={a}>{a}</button>)}</div><label className="sound"><input type="checkbox" checked={p.sound} onChange={e=>setP({...p,sound:e.target.checked})}/> 🔊 Sound effects</label><button onClick={()=>setScreen("home")}>← Back</button></main></>;
 
@@ -499,6 +945,10 @@ function App(){
         badges: progress.badges,
         sessions: progress.sessions,
         strategy_stats: progress.strategyStats,
+
+        minute_math: progress.minuteMath,
+        minute_unlocked: progress.minuteUnlocked,
+
         updated_at: new Date().toISOString()
       })
       .eq("profile_id", activeProfile.id);
