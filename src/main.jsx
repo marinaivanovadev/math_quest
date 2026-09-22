@@ -16,7 +16,7 @@ const LEVELS=[
 {id:10,name:"Math Mastery",skill:"Mixed Challenge",type:"mixed",max:29,time:6,unlock:2000}
 ];
 const AVATARS=["🦄","🐱","🐶","🐰","🦊","🐼","🐨","🐸"];
-const initial={coins:0,stars:0,streak:0,bestStreak:0,correct:0,attempts:0,totalTime:0,hints:0,
+const initial={coins:10,stars:0,streak:0,bestStreak:0,correct:0,attempts:0,totalTime:0,hints:0,
 facts:{},levelStars:{},avatar:"🦄",name:"Math Explorer",sound:true,lastUnlocked:1,
 badges:[],sessions:[],strategyStats:{make10:0,nearDoubles:0,factFamily:0}};
 const load=()=>{try{return{...initial,...JSON.parse(localStorage.getItem("mathQuestV41")||"{}")}}catch{return initial}};
@@ -114,11 +114,22 @@ function App(){
    setP(x=>({...x,sessions:[...x.sessions,{date:Date.now(),level:lid,score,questions:10}]}));
    beep("reward");setScreen("finish")
  }
- function showHint(){
-   if(hint||feedback)return;
-   setHint(q.op==="+"?"numberline":"numberline");
-   setP(x=>({...x,hints:x.hints+1}));
- }
+  function showHint() {
+    if (hint || feedback) return;
+
+    if (p.coins < 3) {
+      setHint("notenough");
+      return;
+    }
+
+    setHint("numberline");
+
+    setP(x => ({
+      ...x,
+      coins: x.coins - 3,
+      hints: x.hints + 1
+    }));
+  }
  function showStrategy(){
    if(feedback)return;
    setStrategy(q.op==="+"?strategyForAdd(q.a,q.b):strategyForSub(q.a,q.b));
@@ -162,8 +173,26 @@ function App(){
  return <><Header p={p} title={`Level ${level.id} · ${level.name}`}/><main className="game"><div className="gameTop"><span>🔥 {p.streak}</span><span>Question {qnum} / 10</span><span>{level.time?`⏱️ ${Math.ceil(left)}s`:"🌿 No timer"}</span></div><div className="dots">{Array.from({length:10},(_,i)=><i className={i<qnum-1?"done":i===qnum-1?"current":""} key={i}/>)}</div>
  <section className="question card"><div className="equation">{q.a} <span>{q.op}</span> {q.b} <span>=</span> <strong>{feedback?.correct?q.answer:"?"}</strong></div>
  {strategy&&!feedback&&<div className="strategy">🧠 <b>Try this:</b> {strategy}</div>}
- {hint&&!feedback&&<div className="hint">💡 Number line: move {q.op==="+"?"forward":"backward"} from {q.a}.<div className="numberLine">{Array.from({length:level.max+1},(_,i)=><span className={i===q.answer?"answerDot":""} key={i}>{i}</span>)}</div></div>}
- {!feedback&&<><div className="answerDisplay">{input||"?"}</div><div className="keypad">{[1,2,3,4,5,6,7,8,9,0].map(n=><button key={n} onClick={()=>setInput(s=>s.length<2?s+n:s)}>{n}</button>)}<button onClick={()=>setInput(s=>s.slice(0,-1))}>⌫</button><button className="go" onClick={()=>answer()}>✓</button></div><div className="helpRow"><button onClick={showHint}>💡 Hint</button><button onClick={showStrategy}>🧠 Strategy</button></div></>}
+     {hint === "numberline" && !feedback &&
+       <div className="hint">
+         💡 Number line: move {q.op === "+" ? "forward" : "backward"} from {q.a}.
+         <div className="numberLine">
+           {Array.from({ length: level.max + 1 }, (_, i) =>
+             <span className={i === q.answer ? "answerDot" : ""} key={i}>{i}</span>
+           )}
+         </div>
+       </div>
+     }
+
+     {hint === "notenough" && !feedback &&
+       <div className="hint">
+         🪙 You need 3 coins to buy a hint. Try it yourself first!
+       </div>
+     }
+     {!feedback && <><div className="answerDisplay">{input || "?"}</div><div className="keypad">{[1, 2, 3, 4, 5, 6, 7, 8, 9, 0].map(n => <button key={n} onClick={() => setInput(s => s.length < 2 ? s + n : s)}>{n}</button>)}<button onClick={() => setInput(s => s.slice(0, -1))}>⌫</button><button className="go" onClick={() => answer()}>✓</button></div><div className="helpRow"><button onClick={showHint} disabled={hint === "numberline"}>
+       {hint === "numberline" ? "✓ Hint used" : "💡 Hint −3 🪙"}
+     </button>
+       <button onClick={showStrategy}>🧠 Strategy</button></div></>}
  {feedback&&<div className={`feedback ${feedback.correct?"good":"try"}`}><div className="big">{feedback.correct?"🎉 Great job!":feedback.timeout?"⏰ Time's up!":"🌟 Nice try!"}</div><p>{feedback.correct?`The answer is ${q.answer}. You earned coins!`:`The answer is ${q.answer}. Let's learn it together.`}</p><button className="next" onClick={next}>{qnum===10?"See my reward! 🎁":"Next →"}</button></div>}</section></main></>
 }
 function Header({p,title}){return <header><div className="logo">{title||"🌈 Math Quest"}</div><div className="coins">{p.avatar}　🪙 {p.coins}</div></header>}
