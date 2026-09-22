@@ -152,7 +152,7 @@ function App(){
 
  if(screen==="home")return <><Header p={p}/><main className="home">
   <section className="hero card"><button className="avatarBtn" onClick={()=>setScreen("avatar")}>{p.avatar}</button><div><h1>Hi, {p.name}! 🌈</h1><p>Ready for today's math adventure?</p></div><div className="stats"><span>🪙 {p.coins}</span><span>⭐ {p.stars}</span><span>🔥 {p.bestStreak}</span></div></section>
-  <div className="daily card"><div><b>🌟 Today's Mission</b><p>Finish one 10-question adventure.</p></div><button onClick={()=>start(Math.max(1,Math.min(p.lastUnlocked,10)))}>Play</button></div>
+  
   <h2>🗺️ Choose an adventure</h2><div className="levels">{LEVELS.map(l=>{const open=unlocked(l.id);return <button disabled={!open} className={`level card ${open?"":"locked"}`} onClick={()=>start(l.id)} key={l.id}><div className="levelIcon">{open?["🌱","🐰","🌈","🌲","💎","🏰","☁️","🌙","⭐","👑"][l.id-1]:"🔒"}</div><div><strong>Level {l.id}: {l.name}</strong><small>{l.skill}</small></div>{!open&&<em>{l.unlock} 🪙</em>}</button>})}</div>
   <div className="actions"><button onClick={()=>setScreen("dashboard")}>👩‍👧 Parent Dashboard</button><button onClick={()=>setScreen("avatar")}>🧸 My Character</button><button className="secondary" onClick={()=>setP(x=>({...x,sound:!x.sound}))}>{p.sound?"🔊 Sound On":"🔇 Sound Off"}</button></div>
  </main></>;
@@ -170,7 +170,22 @@ function App(){
 
  if(screen==="game"&&(!q||!level))return <><Header p={p} title={`Level ${level.id} · ${level.name}`}/><main className="game"><section className="question card loading"><div className="big">🌟</div><h2>Getting your question ready…</h2></section></main></>;
 
- return <><Header p={p} title={`Level ${level.id} · ${level.name}`}/><main className="game"><div className="gameTop"><span>🔥 {p.streak}</span><span>Question {qnum} / 10</span><span>{level.time?`⏱️ ${Math.ceil(left)}s`:"🌿 No timer"}</span></div><div className="dots">{Array.from({length:10},(_,i)=><i className={i<qnum-1?"done":i===qnum-1?"current":""} key={i}/>)}</div>
+  return <><Header p={p} title={`Level ${level.id} · ${level.name}`} /><main className="game">
+
+    <div className="gameTop">
+      <button
+        className="homeBtn"
+        onClick={() => setScreen("home")}
+      >
+        🏠 Main Menu
+      </button>
+
+      <span>🔥 {p.streak}</span>
+      <span>Question {qnum} / 10</span>
+      <span>{level.time ? `⏱️ ${Math.ceil(left)}s` : "🌿 No timer"}</span>
+    </div>
+    
+    <div className="dots">{Array.from({ length: 10 }, (_, i) => <i className={i < qnum - 1 ? "done" : i === qnum - 1 ? "current" : ""} key={i} />)}</div>
  <section className="question card"><div className="equation">{q.a} <span>{q.op}</span> {q.b} <span>=</span> <strong>{feedback?.correct?q.answer:"?"}</strong></div>
  {strategy&&!feedback&&<div className="strategy">🧠 <b>Try this:</b> {strategy}</div>}
      {hint === "numberline" && !feedback &&
