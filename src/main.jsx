@@ -1,7 +1,7 @@
-
 import React,{useEffect,useMemo,useState}from"react";
 import{createRoot}from"react-dom/client";
-import"./styles.css";
+import "./styles.css";
+import { supabase } from "./supabase";
 
 const LEVELS=[
 {id:1,name:"Sunny Meadow",skill:"Addition to 10",type:"add",max:10,time:0,unlock:0},
@@ -32,7 +32,174 @@ function App(){
  const level=useMemo(()=>LEVELS.find(x=>x.id===lid),[lid]);
  useEffect(()=>localStorage.setItem("mathQuestV41",JSON.stringify(p)),[p]);
 
- const unlocked=id=>id===1||p.coins>=LEVELS[id-1].unlock;
+  const unlocked = id => id === 1 || p.coins >= LEVELS[id - 1].unlock;
+  
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [authError, setAuthError] = useState("");
+  const [profiles, setProfiles] = useState([]);
+  const [activeProfile, setActiveProfile] = useState(null);
+  const [cloudLoading, setCloudLoading] = useState(false);
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      setUser(data.session?.user ?? null);
+      setAuthLoading(false);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+  async function signIn() {
+    setAuthError("");
+
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password
+    });
+
+    if (error) {
+      setAuthError(error.message);
+      return;
+    }
+
+    setUser(data.user);
+  }
+
+  async function loadProfiles() {
+    if (!user) return;
+
+    setCloudLoading(true);
+
+    const { data, error } = await supabase
+      .from("child_profiles")
+      .select("*, game_progress(*)")
+      .eq("user_id", user.id)
+      .order("created_at");
+
+    if (error) {
+      console.error("Profile loading error:", error);
+    } else {
+      setProfiles(data || []);
+    }
+
+    setCloudLoading(false);
+  }
+
+  useEffect(() => {
+    if (user) loadProfiles();
+  }, [user]);
+
+  async function createKids() {
+    if (!user) return;
+
+    setCloudLoading(true);
+
+    const kids = [
+      { name: "Polina", avatar: "🦄" },
+      { name: "Roman", avatar: "🦊" }
+    ];
+
+    for (const kid of kids) {
+
+      const { data: existing } = await supabase
+        .from("child_profiles")
+        .select("id")
+        .eq("user_id", user.id)
+        .eq("name", kid.name)
+        .maybeSingle();
+
+      if (existing) continue;
+
+      const { data: profile, error } = await supabase
+        .from("child_profiles")
+        .insert({
+          user_id: user.id,
+          name: kid.name,
+          avatar: kid.avatar
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error("Profile creation error:", error);
+        continue;
+      }
+
+      const { error: progressError } = await supabase
+        .from("game_progress")
+        .insert({
+          profile_id: profile.id,
+          coins: 10
+        });
+
+      if (progressError) {
+        console.error("Progress creation error:", progressError);
+      }
+    }
+
+    await loadProfiles();
+    setCloudLoading(false);
+  }
+
+  async function selectProfile(profile) {
+    setCloudLoading(true);
+
+    const { data: gp, error } = await supabase
+      .from("game_progress")
+      .select("*")
+      .eq("profile_id", profile.id)
+      .single();
+
+    if (error) {
+      console.error("Progress loading error:", error);
+      setCloudLoading(false);
+      return;
+    }
+
+    setP({
+      ...initial,
+
+      coins: gp?.coins ?? 10,
+      stars: gp?.stars ?? 0,
+      streak: gp?.streak ?? 0,
+      bestStreak: gp?.best_streak ?? 0,
+
+      correct: gp?.correct ?? 0,
+      attempts: gp?.attempts ?? 0,
+      totalTime: Number(gp?.total_time ?? 0),
+
+      hints: gp?.hints ?? 0,
+
+      facts: gp?.facts ?? {},
+      levelStars: gp?.level_stars ?? {},
+      badges: gp?.badges ?? [],
+      sessions: gp?.sessions ?? [],
+      strategyStats: gp?.strategy_stats ?? {},
+
+      lastUnlocked: gp?.last_unlocked ?? 1,
+
+      avatar: profile.avatar,
+      name: profile.name,
+      sound: true
+    });
+
+    setActiveProfile(profile);
+    setScreen("home");
+    setCloudLoading(false);
+  }
+  async function switchPlayer() {
+    await saveProgressToCloud(p);
+
+    setActiveProfile(null);
+    setScreen("home");
+
+    await loadProfiles();
+  }
  useEffect(()=>{
    const maxOpen=LEVELS.filter(l=>unlocked(l.id)).reduce((m,l)=>Math.max(m,l.id),1);
    if(maxOpen>p.lastUnlocked){
@@ -147,16 +314,119 @@ function App(){
    accuracy:(f.correct||0)/Math.max(1,(f.correct||0)+(f.wrong||0)),avg:(f.time||0)/Math.max(1,(f.correct||0)+(f.wrong||0))}))
    .filter(x=>x.wrong>0).sort((a,b)=>a.accuracy-b.accuracy||b.avg-a.avg).slice(0,15);
  const avg=p.attempts?p.totalTime/p.attempts:0;
+  if (authLoading) {
+    return <main className="settings card">
+      <h1>🌈 Math Quest</h1>
+      <p>Loading...</p>
+    </main>
+  }
 
+  if (!user) {
+    return <main className="settings card">
+      <h1>🌈 Math Quest</h1>
+      <h2>Parent Sign In</h2>
+
+      <input
+        type="email"
+        placeholder="Email"
+        value={email}
+        onChange={e => setEmail(e.target.value)}
+      />
+
+      <input
+        type="password"
+        placeholder="Password"
+        value={password}
+        onChange={e => setPassword(e.target.value)}
+      />
+
+      {authError &&
+        <div className="empty">
+          {authError}
+        </div>
+      }
+
+      <button onClick={signIn}>
+        Sign In
+      </button>
+    </main>
+  }
+
+  if (!activeProfile) {
+
+    if (cloudLoading) {
+      return <main className="settings card">
+        <h1>🌈 Math Quest</h1>
+        <p>Loading players...</p>
+      </main>
+    }
+
+    if (profiles.length === 0) {
+      return <main className="settings card">
+        <h1>🌈 Math Quest</h1>
+        <h2>Welcome!</h2>
+        <p>Create your Math Quest players.</p>
+
+        <button onClick={createKids}>
+          Create Polina & Roman
+        </button>
+      </main>
+    }
+
+    return <main className="settings card">
+      <h1>🌈 Who is playing?</h1>
+
+      <div className="avatarGrid">
+        {profiles.map(profile =>
+          <button
+            key={profile.id}
+            onClick={() => selectProfile(profile)}
+          >
+            <div style={{ fontSize: "48px" }}>
+              {profile.avatar}
+            </div>
+
+            <strong>{profile.name}</strong>
+          </button>
+        )}
+      </div>
+    </main>
+  }
  if(notice)return <div className="overlay"><div className="notice card"><div className="confetti">🎊 ✨ 🎉</div><h1>New Adventure Unlocked!</h1><p>{notice}</p><button onClick={()=>setNotice(null)}>Let's go! →</button></div></div>;
 
  if(screen==="home")return <><Header p={p}/><main className="home">
   <section className="hero card"><button className="avatarBtn" onClick={()=>setScreen("avatar")}>{p.avatar}</button><div><h1>Hi, {p.name}! 🌈</h1><p>Ready for today's math adventure?</p></div><div className="stats"><span>🪙 {p.coins}</span><span>⭐ {p.stars}</span><span>🔥 {p.bestStreak}</span></div></section>
   
   <h2>🗺️ Choose an adventure</h2><div className="levels">{LEVELS.map(l=>{const open=unlocked(l.id);return <button disabled={!open} className={`level card ${open?"":"locked"}`} onClick={()=>start(l.id)} key={l.id}><div className="levelIcon">{open?["🌱","🐰","🌈","🌲","💎","🏰","☁️","🌙","⭐","👑"][l.id-1]:"🔒"}</div><div><strong>Level {l.id}: {l.name}</strong><small>{l.skill}</small></div>{!open&&<em>{l.unlock} 🪙</em>}</button>})}</div>
-  <div className="actions"><button onClick={()=>setScreen("dashboard")}>👩‍👧 Parent Dashboard</button><button onClick={()=>setScreen("avatar")}>🧸 My Character</button><button className="secondary" onClick={()=>setP(x=>({...x,sound:!x.sound}))}>{p.sound?"🔊 Sound On":"🔇 Sound Off"}</button></div>
+   <div className="actions"><button onClick={() => setScreen("dashboard")}>👩‍👧 Parent Dashboard</button><button onClick={() => setScreen("avatar")}>🧸 My Character</button><button className="secondary" onClick={() => setP(x => ({ ...x, sound: !x.sound }))}>{p.sound ? "🔊 Sound On" : "🔇 Sound Off"}</button><button
+     className="secondary"
+     onClick={switchPlayer}
+   >
+     🔄 Switch Player
+   </button></div>
  </main></>;
+  async function changeAvatar(avatar) {
+    setP(x => ({ ...x, avatar }));
 
+    setProfiles(list =>
+      list.map(profile =>
+        profile.id === activeProfile.id
+          ? { ...profile, avatar }
+          : profile
+      )
+    );
+
+    setActiveProfile(profile => ({ ...profile, avatar }));
+
+    const { error } = await supabase
+      .from("child_profiles")
+      .update({ avatar })
+      .eq("id", activeProfile.id);
+
+    if (error) {
+      console.error("Avatar save error:", error);
+    }
+  }
  if(screen==="avatar")return <><Header p={p}/><main className="settings card"><h1>🧸 My Character</h1><div className="bigAvatar">{p.avatar}</div><input value={p.name} onChange={e=>setP({...p,name:e.target.value.slice(0,18)})}/><div className="avatarGrid">{AVATARS.map(a=><button className={a===p.avatar?"selected":""} onClick={()=>setP({...p,avatar:a})} key={a}>{a}</button>)}</div><label className="sound"><input type="checkbox" checked={p.sound} onChange={e=>setP({...p,sound:e.target.checked})}/> 🔊 Sound effects</label><button onClick={()=>setScreen("home")}>← Back</button></main></>;
 
  if(screen==="dashboard")return <><Header p={p}/><main className="dashboard card"><h1>👩‍👧 Parent Dashboard</h1><p>The game adapts practice using accuracy, mistakes and response time.</p>
@@ -208,7 +478,44 @@ function App(){
        {hint === "numberline" ? "✓ Hint used" : "💡 Hint −3 🪙"}
      </button>
        <button onClick={showStrategy}>🧠 Strategy</button></div></>}
- {feedback&&<div className={`feedback ${feedback.correct?"good":"try"}`}><div className="big">{feedback.correct?"🎉 Great job!":feedback.timeout?"⏰ Time's up!":"🌟 Nice try!"}</div><p>{feedback.correct?`The answer is ${q.answer}. You earned coins!`:`The answer is ${q.answer}. Let's learn it together.`}</p><button className="next" onClick={next}>{qnum===10?"See my reward! 🎁":"Next →"}</button></div>}</section></main></>
+      {feedback && <div className={`feedback ${feedback.correct ? "good" : "try"}`}><div className="big">{feedback.correct ? "🎉 Great job!" : feedback.timeout ? "⏰ Time's up!" : "🌟 Nice try!"}</div><p>{feedback.correct ? `The answer is ${q.answer}. You earned coins!` : `The answer is ${q.answer}. Let's learn it together.`}</p><button className="next" onClick={next}>{qnum === 10 ? "See my reward! 🎁" : "Next →"}</button></div>}</section></main></>
+  async function saveProgressToCloud(progress = p) {
+    if (!activeProfile) return;
+
+    const { error } = await supabase
+      .from("game_progress")
+      .update({
+        coins: progress.coins,
+        stars: progress.stars,
+        streak: progress.streak,
+        best_streak: progress.bestStreak,
+        correct: progress.correct,
+        attempts: progress.attempts,
+        total_time: progress.totalTime,
+        hints: progress.hints,
+        last_unlocked: progress.lastUnlocked,
+        facts: progress.facts,
+        level_stars: progress.levelStars,
+        badges: progress.badges,
+        sessions: progress.sessions,
+        strategy_stats: progress.strategyStats,
+        updated_at: new Date().toISOString()
+      })
+      .eq("profile_id", activeProfile.id);
+
+    if (error) {
+      console.error("Cloud save error:", error);
+    }
+  }
+  useEffect(() => {
+    if (!activeProfile) return;
+
+    const timer = setTimeout(() => {
+      saveProgressToCloud(p);
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [p, activeProfile]);
 }
 function Header({p,title}){return <header><div className="logo">{title||"🌈 Math Quest"}</div><div className="coins">{p.avatar}　🪙 {p.coins}</div></header>}
 createRoot(document.getElementById("root")).render(<App/>);
